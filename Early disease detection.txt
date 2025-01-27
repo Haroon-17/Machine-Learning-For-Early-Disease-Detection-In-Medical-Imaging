@@ -1,0 +1,110 @@
+import os
+import itertools
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, classification_report
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.optimizers import Adamax
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
+import warnings
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
+
+# Load training data
+train_data_dir = 'Training'
+filepaths = []
+labels = []
+folds = os.listdir(train_data_dir)
+
+for fold in folds:
+    foldpath = os.path.join(train_data_dir, fold)
+    filelist = os.listdir(foldpath)
+    for file in filelist:
+        fpath = os.path.join(foldpath, file)
+        filepaths.append(fpath)
+        labels.append(fold)
+
+Fseries = pd.Series(filepaths, name='filepaths')
+Lseries = pd.Series(labels, name='labels')
+train_df = pd.concat([Fseries, Lseries], axis=1)
+
+# Load testing data
+test_data_dir = 'Testing'
+filepaths = []
+labels = []
+folds = os.listdir(test_data_dir)
+
+for fold in folds:
+    foldpath = os.path.join(test_data_dir, fold)
+    filelist = os.listdir(foldpath)
+    for file in filelist:
+        fpath = os.path.join(foldpath, file)
+        filepaths.append(fpath)
+        labels.append(fold)
+
+Fseries = pd.Series(filepaths, name='filepaths')
+Lseries = pd.Series(labels, name='labels')
+ts_df = pd.concat([Fseries, Lseries], axis=1)
+
+# Data balance visualization
+data_balance = train_df.labels.value_counts()
+
+def custom_autopct(pct):
+    total = sum(data_balance)
+    val = int(round(pct * total / 100.0))
+    return "{:.1f}%\n({:d})".format(pct, val)
+
+plt.pie(data_balance, labels=data_balance.index, autopct=custom_autopct, colors=["#2092E6", "#6D8CE6", "#20D0E6", "#A579EB"])
+plt.title("Training Data Balance")
+plt.axis("equal")
+plt.show()
+
+# Split the data
+valid_df, test_df = train_test_split(ts_df, train_size=0.5, shuffle=True, random_state=42)
+
+# Image data generator
+batch_size = 16
+img_size = (224, 224)
+train_gen = ImageDataGenerator().flow_from_dataframe(train_df, x_col='filepaths', y_col='labels', target_size=img_size, batch_size=batch_size, class_mode='categorical')
+valid_gen = ImageDataGenerator().flow_from_dataframe(valid_df, x_col='filepaths', y_col='labels', target_size=img_size, batch_size=batch_size, class_mode='categorical')
+test_gen = ImageDataGenerator().flow_from_dataframe(test_df, x_col='filepaths', y_col='labels', target_size=img_size, batch_size=batch_size, class_mode='categorical')
+
+# Visualize some training images
+g_dict = train_gen.class_indices
+classes = list(g_dict.keys())
+images, labels = next(train_gen)
+
+plt.figure(figsize=(20, 20))
+for i in range(16):
+    plt.subplot(4, 4, i + 1)
+    image = images[i] / 255
+    plt.imshow(image)
+    index = np.argmax(labels[i])
+    class_name = classes[index]
+    plt.title(class_name, color='black', fontsize=16)
+    plt.axis('off')
+plt.tight_layout()
+plt.show()
+
+# Build the model
+img_shape = (img_size[0], img_size[1], 3)
+class_count = len(classes)
+
+model = Sequential()
+model.add(Conv2D(filters=32, kernel_size=(3, 3), padding="same", activation="relu", input_shape=img_shape))
+model.add(MaxPooling2D())
+model.add(Conv2D(filters=64, kernel_size=(3, 3), padding="same", activation="relu"))
+model.add(MaxPooling2D())
+model.add(Flatten())
+model.add(Dense(64, activation="relu"))
+model.add(Dense(32, activation="relu"))
+model.add(Dense(class_count, activation="softmax"))
+
+model.compile(optimizer=Adamax(learning_rate))
